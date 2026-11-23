@@ -263,20 +263,39 @@ on `mjx-shell` in `docker-compose.gpu.yml`:
 Close other GPU-using apps before MJX runs anyway. Check what is free while a
 run is going with `nvidia-smi` on the Windows side, not in the container.
 
-### Results
+### Results — and a retraction
 
-```
-$ docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm mjx-shell python playground/_mjx_probe.py
-device: cuda:0
-  [ok  ] put_model                  -> uploaded
-  [ok  ] put_data                   -> uploaded
-  [ok  ] kinematics                 -> ok
-  [ok  ] forward                    -> ok
-  [ok  ] step x1                    -> ok
-  [ok  ] step x10 via scan          -> ok
-```
+`playground/_mjx_seq.py` established that **`mjx.step` is functional, not
+in-place**: it returns a new `Data`. So `mjx.step(mm, md)` with the result
+discarded advances nothing — 200 such calls left a free sphere at `z=0.0000`,
+where the real value after 200 steps of the default 2 ms timestep is ≈ -0.79.
 
-So MJX does run on the P1000, including a 10-step `lax.scan`.
+That invalidates the earlier "MJX works on the GPU, including a 10-step
+`lax.scan`" result recorded here. `playground/_mjx_probe.py` used the
+discard-the-result form for its `step x1` line, so that line passed by doing
+nothing. Two independent ways for a test to be vacuous, both hit:
+
+1. **Wrong API form.** Functional API called as if in-place → no work performed,
+   no exception. "It didn't raise" was really "it didn't run".
+2. **Async execution never observed.** JAX runs out of order and lazily
+   synchronises. If nothing consumes a result, a kernel-load failure can go
+   unreported. Every check must consume an output — `float(...)` forces a
+   device-to-host copy and surfaces the error at the right place.
+
+`playground/_mjx_sync.py` is the corrected form: assignment **plus** `float()`,
+printing the resulting height so a silent no-op is visible as
+`NO-OP, sim did not advance` rather than a pass.
+
+What is still solid, because it was consumed properly: plain CUDA compute works.
+`float((x @ x).sum())` on a 2048² matrix returned the correct value with
+`x.devices()` reporting the P1000.
+
+The open question is whether `mjx.step` can execute on this GPU at all. The
+earlier `CUBIN ... CUDA_ERROR_NOT_SUPPORTED` failures appeared in runs that
+*did* consume their output, so the honest current read is that they were real
+and that the "it works" result was the artefact. `_mjx_sync.py` swept
+N = 1, 2, 20, 200 to find any working size; see the table above this section for
+what has been eliminated.
 
 ### A checker bug worth knowing about
 
