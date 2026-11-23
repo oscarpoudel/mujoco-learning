@@ -1,0 +1,36 @@
+# Build context stays tiny: the 818 MB of cloned repos are bind-mounted at
+# runtime, never baked into the image. Without this, every build uploads ~820 MB.
+repos/
+
+# Version control
+.git/
+.gitignore
+
+# Regenerable artifacts
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.mujoco.ini
+MUJOCO_LOG.TXT
+*.png
+*.ppm
+*.mp4
+*.gif
+*.pth
+*.zip
+runs/
+logs/
+checkpoints/
+
+# Docs that aren't needed at build time
+notes/
+LICENSING.md
+DOCKER.md
+*.md
+!README.md
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini

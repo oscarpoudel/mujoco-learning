@@ -1,0 +1,63 @@
+# GPU override -- INACTIVE until the NVIDIA driver on Windows supports CUDA on WSL.
+#
+# This host currently fails at the first gate: driver 452.56 (CUDA 11.0, Oct 2020)
+# predates R470, the branch that introduced CUDA-on-WSL. The nvidia runtime is
+# registered in Docker, but the driver exposes no WSL adapters, so
+# `--gpus all` fails with "WSL environment detected but no adapters were found".
+#
+# Read notes/0002-gpu-enablement-checklist.md and work the gates in order.
+# Do NOT just install whatever nvidia.com offers as "latest": R590+ dropped
+# Maxwell/Pascal/Volta, and this is a Pascal Quadro P1000. R580 is the last branch
+# that supports it.
+#
+# Usage once the driver is fixed:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm sim nvidia-smi
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up studio
+
+services:
+  studio:
+    runtime: nvidia
+    environment:
+      # Hardware EGL instead of llvmpipe software rasterisation.
+      MUJOCO_GL: egl
+      NVIDIA_VISIBLE_DEVICES: all
+      # "graphics" is required for GL/EGL; "compute,utility" for CUDA.
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics
+
+  learn:
+    runtime: nvidia
+    environment:
+      MUJOCO_GL: egl
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics
+
+  sim:
+    runtime: nvidia
+    environment:
+      MUJOCO_GL: egl
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics
+
+  shell:
+    runtime: nvidia
+    environment:
+      MUJOCO_GL: egl
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics
+
+  rl-shell:
+    runtime: nvidia
+    environment:
+      MUJOCO_GL: egl
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics
+
+  mjx-shell:
+    runtime: nvidia
+    environment:
+      MUJOCO_GL: egl
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics
+    # MJX needs the CUDA-enabled jaxlib. Note the extra is cuda12, NOT cuda13:
+    # the cuda13 wheels require compute capability 7.5+ (Turing), and the P1000
+    # is 6.1. See the Dockerfile mjx stage.

@@ -1,0 +1,123 @@
+name: mujoco-learning
+
+# Shared settings. Every service bind-mounts the project at /workspace, so edits
+# on the Windows side are live inside the container -- no rebuilds while learning.
+x-defaults: &defaults
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+    target: base
+  volumes:
+    - .:/workspace
+  working_dir: /workspace
+  environment:
+    MUJOCO_GL: osmesa
+    MPLBACKEND: Agg
+  # MuJoCo and video encoding both want more than the default 64 MB of /dev/shm.
+  shm_size: 1gb
+  # The image runs as uid 1000. Uncomment to force root if a Windows-mounted
+  # path refuses writes (drvfs decides ownership by mount options, not chown).
+  # user: root
+
+services:
+  # ---------------------------------------------------------------------------
+  # MuJoCo Studio in the browser. THIS is the viewer to use in Docker: there is
+  # no X11 in the Docker Desktop VM, and web mode also dodges the 4.0.1 native
+  # viewer crash. Rendering happens in your browser, so no GPU is needed.
+  #
+  #   docker compose up studio
+  #   docker compose up studio -e MODEL=repos/Tutorial_Mujoco_RL/1tutorial_ur5e/model/universal_robots_ur5e/scene.xml
+  #
+  studio:
+    <<: *defaults
+    container_name: mujoco-studio
+    ports:
+      # 9080, not 8080: VS Code holds 127.0.0.1:8080 on this machine (Code.exe),
+      # which collides with a wildcard publish. The web viewer also opens a
+      # second port next to the one requested, so a small range is published.
+      - "9080-9082:9080-9082"
+    environment:
+      MUJOCO_GL: osmesa
+      MODEL: playground/models/ball.xml
+    command: >
+      python -m mujoco.studio.viewer
+      --model=${MODEL:-playground/models/ball.xml}
+      --gfx=web
+      --port=9080
+      --hot_reload=all
+    healthcheck:
+      disable: true
+
+  # ---------------------------------------------------------------------------
+  # JupyterLab for the MuJoCo-Tutorial notebooks.
+  #
+  #   docker compose up learn     ->  http://localhost:8888
+  #
+  learn:
+    <<: *defaults
+    container_name: mujoco-jupyter
+    ports:
+      - "8888:8888"
+    command: >
+      jupyter lab
+      --ip=0.0.0.0
+      --port=8888
+      --no-browser
+      --ServerApp.token=''
+      --ServerApp.password=''
+      --ServerApp.allow_remote_access=True
+      --ServerApp.root_dir=/workspace
+      --ServerApp.notebook_dir=/workspace
+    healthcheck:
+      disable: true
+
+  # ---------------------------------------------------------------------------
+  # One-shot smoke test. Exits 0 if physics + software rendering both work.
+  #
+  #   docker compose run --rm sim
+  #
+  sim:
+    <<: *defaults
+    command: python playground/first_sim.py
+
+  # ---------------------------------------------------------------------------
+  # Interactive shell (base image: mujoco, gymnasium, jupyter).
+  #
+  #   docker compose run --rm shell
+  #
+  shell:
+    <<: *defaults
+    stdin_open: true
+    tty: true
+    command: bash
+
+  # ---------------------------------------------------------------------------
+  # RL shell: adds stable-baselines3, CPU torch, ikpy.
+  #
+  #   docker compose run --rm rl-shell
+  #   docker compose run --rm rl-shell python repos/Tutorial_Mujoco_RL/2tutorial_InvertedPendulum/mujoco_reinforce_disp.py
+  #
+  rl-shell:
+    <<: *defaults
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: rl
+    stdin_open: true
+    tty: true
+    command: bash
+
+  # ---------------------------------------------------------------------------
+  # MJX shell: adds JAX (CPU backend only on this host).
+  #
+  #   docker compose run --rm mjx-shell
+  #
+  mjx-shell:
+    <<: *defaults
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: mjx
+    stdin_open: true
+    tty: true
+    command: bash

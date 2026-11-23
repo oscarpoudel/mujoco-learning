@@ -1,0 +1,18 @@
+# Normalise line endings in the object store; check out per-platform by default.
+* text=auto
+
+# PowerShell scripts must keep CRLF: Windows PowerShell 5.1 mis-parses some
+# here-strings and switch syntax in LF files.
+*.ps1 text eol=crlf
+
+# Anything the Linux container reads must be LF, or the shebang breaks.
+Dockerfile text eol=lf
+*.sh text eol=lf
+docker-compose*.yml text eol=lf
+
+# Binary
+*.png binary
+*.jpg binary
+*.mp4 binary
+*.gif binary
+*.ppm binary

@@ -1,0 +1,37 @@
+# --- upstream clones ---------------------------------------------------------
+# These are three separate git repos with their own remotes and histories.
+# A parent repo cannot track them as ordinary files; use git submodules if you
+# ever want them pinned by commit. Two of them also have no license, so keeping
+# them out of any published repo is the right default either way. See LICENSING.md.
+repos/
+
+# --- python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.ipynb_checkpoints/
+.mujoco.ini
+
+# --- training / render outputs ----------------------------------------------
+runs/
+logs/
+checkpoints/
+*.pth
+*.zip
+*.mp4
+*.gif
+*.ppm
+*.png
+!playground/**/*.png
+
+# --- sim artifacts -----------------------------------------------------------
+MUJOCO_LOG.TXT
+*.mjb
+
+# --- editors / os ------------------------------------------------------------
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
