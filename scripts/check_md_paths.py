@@ -63,8 +63,10 @@ for dirpath, dirnames, filenames in os.walk(ROOT):
                     continue
                 if " " in tok:                       # CLI snippet, not a path
                     continue
-                # Files that live in the installed mujoco package, not this repo.
-                if os.path.basename(tok) in {"native_viewer.py"}:
+                # Files that live in the installed mujoco package or the conda
+                # environment, not in this repository.
+                if os.path.basename(tok) in {"native_viewer.py", "usercustomize.py",
+                                             "sitecustomize.py"}:
                     continue
                 checked += 1
                 norm = tok.replace("\\", "/").lstrip("./")

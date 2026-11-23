@@ -16,6 +16,7 @@ under PD control, rendered offscreen.*
 
 ## Contents
 
+- [Start here](START-HERE.md) — the verified first hour: what to run, in order, with the output each command produces
 - [Acknowledgements](#acknowledgements)
 - [Layout](#layout)
 - [Setup](#setup) — [local](#local-install) · [upstream tutorials](#fetching-the-upstream-tutorials) · [Docker](#docker) · [GPU](#gpu-acceleration)
@@ -53,6 +54,7 @@ under Apache 2.0. Several robot models used across these repositories come from
 ```
 mujoco-learning/
 ├── README.md              This file
+├── START-HERE.md          Verified first hour: commands, output, what to skip
 ├── DOCKER.md              Container design, verified behaviour, caveats
 ├── LICENSING.md           Per-repository licence status and its consequences
 ├── docker-compose.yml     studio / learn / sim / shell / rl-shell / mjx-shell
@@ -64,10 +66,15 @@ mujoco-learning/
 │   └── mjx_check.py       GPU readiness gate; fails on silent CPU fallback
 ├── repos/                 Upstream clones, unmodified (not committed)
 ├── playground/            Exercises, sanity checks and benchmarks
-│   ├── first_sim.py
-│   ├── render_bench.py
+│   ├── first_sim.py       Install sanity check; prints SIM OK
+│   ├── watch.py           Runs any example at real time, holds the window open
+│   ├── nb_check.py        Executes notebooks, reports the failing cell
+│   ├── render_bench.py    osmesa vs egl, with the benchmark trap documented
+│   ├── fixed/             Upstream examples patched for MuJoCo 4.x / Windows
 │   └── models/ball.xml
 ├── scripts/
+│   ├── env_check.py       Which learning stages this environment can run
+│   ├── setup_ffmpeg_shim.ps1  Points `ffmpeg` at a working binary
 │   ├── studio.ps1         Studio launcher that avoids the 4.0.1 viewer bug
 │   ├── gpu-gates.ps1      Runs the GPU enablement checks in order
 │   └── check_md_paths.py  Verifies every file path referenced in the docs
@@ -92,12 +99,18 @@ pip install mujoco
 python playground\first_sim.py     # prints SIM OK when the install is healthy
 ```
 
+Then report what the environment can actually run:
+
+```powershell
+python scripts\env_check.py        # per-stage readiness; exit 0 when the core works
+```
+
 Add tutorial dependencies as you reach the relevant stage — the RL and
 perception stacks are heavy:
 
 ```powershell
 # Stages 1-3
-pip install "gymnasium[mujoco]" scipy matplotlib mediapy ipywidgets
+pip install "gymnasium[mujoco]" scipy matplotlib mediapy ipywidgets jupyterlab imageio-ffmpeg
 
 # Stage 4: reinforcement learning
 pip install "stable-baselines3[extra]" torch pandas seaborn transforms3d ikpy
@@ -105,6 +118,14 @@ pip install "stable-baselines3[extra]" torch pandas seaborn transforms3d ikpy
 # Stage 5: perception and planning
 pip install opencv-python networkx shapely osqp "imageio[ffmpeg]"
 ```
+
+`imageio-ffmpeg` is in the Stage 1-3 line on purpose: `mediapy` shells out to an
+`ffmpeg` binary for every video, and a missing one is the most common cause of a
+tutorial failing for reasons unrelated to MuJoCo. On Windows, `conda install
+ffmpeg` produces a binary that dies at startup (`0xC0000139`,
+STATUS_ENTRYPOINT_NOT_FOUND) while remaining first on `PATH`, which is worse
+than having nothing. `scripts\setup_ffmpeg_shim.ps1` points `ffmpeg` at the
+working static build instead; see [Known issues](#known-issues).
 
 **Do not install the requirements files inside `repos/` unmodified.** They pin
 older releases and will downgrade a working install:
@@ -255,10 +276,37 @@ llvmpipe. `playground/render_bench.py` measures the difference, which is within
 unable to detect it at all. Details in
 [notes/0002](notes/0002-gpu-enablement-checklist.md).
 
+**Video export fails on Windows with a misleading error.** `mediapy` shells out
+to `ffmpeg`, and `conda install ffmpeg` yields a binary that dies at startup
+with exit `-1073741511` (`0xC0000139`, STATUS_ENTRYPOINT_NOT_FOUND) — its DLL
+set conflicts with other packages in the environment. Because it *is* on `PATH`,
+callers report `Error writing 'out.mp4': ` with an empty message, or claim
+ffmpeg is missing. `imageio-ffmpeg` ships a self-contained build that works, but
+its filename is versioned (`ffmpeg-win-x86_64-v9.0.2.exe`) so `shutil.which`
+cannot find it. `scripts\setup_ffmpeg_shim.ps1` creates a hard link named
+`ffmpeg.exe` and installs both conda activation hooks and a `usercustomize.py`
+block, so the binary resolves for activated shells, Jupyter kernels and bare
+`python.exe` invocations alike.
+
+**Examples finish before you can see them.** `launch_passive` has no real-time
+option, and examples loop on simulated time, so a 10-second clip renders in a
+quarter second and the window closes. `playground\watch.py <example.py>` paces
+`mj_step` to wall-clock time and holds the window open afterwards.
+
 **JAX preallocates too much VRAM by default on small cards** and fails with
 `CUDA_ERROR_OUT_OF_MEMORY` before executing anything. `docker-compose.gpu.yml`
 sets `XLA_PYTHON_CLIENT_PREALLOCATE=false` and
 `XLA_PYTHON_CLIENT_MEM_FRACTION=0.35` on the MJX service.
+
+**MJX runs on CPU, not on this GPU.** With the CUDA backend, `mjx.step` fails to
+load its compiled kernel at every step count (`CUBIN ...
+CUDA_ERROR_NOT_SUPPORTED`), while plain CUDA compute succeeds in the same
+process. Forcing `JAX_PLATFORMS=cpu` makes MJX correct — 200 steps of a free
+sphere land at `z=-0.7887`, and `examples/mjx_parallel.py` runs 1000 environments
+× 100 steps without error. So MJX material is usable here, just not
+GPU-accelerated. The full elimination table, and the two ways a JAX check can
+pass while doing nothing, are in
+[notes/0002](notes/0002-gpu-enablement-checklist.md).
 
 ---
 

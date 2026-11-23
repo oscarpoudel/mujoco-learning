@@ -286,16 +286,45 @@ nothing. Two independent ways for a test to be vacuous, both hit:
 printing the resulting height so a silent no-op is visible as
 `NO-OP, sim did not advance` rather than a pass.
 
-What is still solid, because it was consumed properly: plain CUDA compute works.
-`float((x @ x).sum())` on a 2048² matrix returned the correct value with
-`x.devices()` reporting the P1000.
+### Answer: MJX works on CPU, and not at all on this GPU
 
-The open question is whether `mjx.step` can execute on this GPU at all. The
-earlier `CUBIN ... CUDA_ERROR_NOT_SUPPORTED` failures appeared in runs that
-*did* consume their output, so the honest current read is that they were real
-and that the "it works" result was the artefact. `_mjx_sync.py` swept
-N = 1, 2, 20, 200 to find any working size; see the table above this section for
-what has been eliminated.
+`_mjx_sync.py` swept N = 1, 2, 20, 200 against the CUDA backend. **All four
+fail**, each in a process where the control operation succeeded first:
+
+```
+control consumed matmul = 134217728  (expect 134217728)
+N=1
+RESULT FAIL -> JaxRuntimeError: INTERNAL: CUDA error: [0] Failed to load
+               in-memory CUBIN (compiled for a different GPU?)
+```
+
+Step count is therefore irrelevant — it is not a large-kernel or cache issue, and
+no size of `mjx.step` can be loaded. Forcing the CPU backend settles it:
+
+```
+JAX_PLATFORMS=cpu  N=200
+RESULT z=-0.788723  ->  REAL PHYSICS
+```
+
+`z = -0.7887` matches the analytic free-fall distance for 200 steps of a 2 ms
+timestep, so MJX's physics is correct and usable here — just on CPU.
+`repos/MuJoCo-Tutorial/examples/mjx_parallel.py` confirms it end to end with
+`JAX_PLATFORMS=cpu`: 1000 environments × 100 steps, final positions
+`mean=[-0.117 -0.001 0.674]`, `std=[1.71 1.66 1.58]`, trajectory shape
+`(1000, 100, 3)`.
+
+Two practical notes from that run. The `Failed to import warp: No module named
+'warp'` lines are **not** errors — MJX probes for the optional `mujoco_warp`
+backend and proceeds without it. And because the CUDA failure is a kernel *load*
+error that surfaces at first execution, a CPU-forced run of a script that also
+touches GPU elsewhere will look like a GPU success; check
+`jax.devices()[0].platform` rather than assuming.
+
+What remains unexplained is *why* this specific card rejects the module: Pascal
+is supported for CUDA compute here, general XLA codegen works, and the
+eliminations above rule out the usual suspects. Stopping at "this driver/GPU
+combination refuses this module" is the honest position; pursuing it further is
+not worth the time when the CPU backend is correct.
 
 ### A checker bug worth knowing about
 
