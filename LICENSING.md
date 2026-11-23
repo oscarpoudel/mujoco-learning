@@ -42,8 +42,10 @@ its MPC and SLAM implementations.
 
 - Pasting functions or files from `mujoco-robotics-usage` or `Tutorial_Mujoco_RL`
   into `playground/` or any project of mine.
-- Redistributing `repos/` — pushing this folder to a public remote, packaging it,
-  or sharing the ZIP. Note that `repos/` is therefore in `.gitignore`.
+- Redistributing `repos/` — pushing this folder to a public remote **with
+  `repos/` still inside it**, packaging it, or sharing the ZIP. That is why
+  `repos/` is in `.gitignore`, and why the README tells every reader to clone
+  the three upstreams themselves.
 - Assuming the MIT license on `MuJoCo-Tutorial` extends to anything else.
 
 ## Before publishing anything built on this
@@ -57,6 +59,14 @@ its MPC and SLAM implementations.
 4. Robot models carry their own terms regardless of tutorial licensing — check
    the model's own `LICENSE` before shipping any derivative work that embeds
    meshes or MJCF from Menagerie.
+
+## Scope of this repository's own `LICENSE`
+
+The MIT license at the root covers **only the files I wrote** — the README and
+notes, `playground/`, `scripts/`, `docker/`, and the compose files. It does not
+and cannot relicense anything in `repos/`, which is why that directory is not
+published here at all. Anyone reusing this repo still has to obtain the three
+tutorials from their own remotes and comply with their terms.
 
 *I am not a lawyer and this is not legal advice — it's a practical record of
 what these repositories do and do not permit.*

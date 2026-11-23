@@ -280,3 +280,14 @@ and validated for when the driver lands.
 - [Gymnasium MuJoCo envs](https://gymnasium.farama.org/environments/mujoco/) — HalfCheetah, Ant, Humanoid benchmarks
 - [MJX docs](https://mujoco.readthedocs.org/en/stable/mjx.html) and [paper](https://arxiv.org/abs/2307.00282)
 - [robosuite](https://robosuite.ai/) — manipulation benchmarks on MuJoCo
+
+---
+
+## License
+
+The files I wrote (README, `notes/`, `playground/`, `scripts/`, `docker/`,
+compose files) are MIT — see [LICENSE](LICENSE). The three tutorials live in
+their own repositories under their own terms and are **not** published here;
+[LICENSING.md](LICENSING.md) records what each of them permits, including the
+fact that two of them state no license at all. MuJoCo is Apache 2.0 by
+Google DeepMind.
