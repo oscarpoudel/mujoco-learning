@@ -312,18 +312,25 @@ What has been eliminated, each by a dedicated run rather than by reasoning:
 | Compilation-thread context race | `XLA_FLAGS=--xla_gpu_force_compilation_parallelism=1` | **No** — same failure |
 | `with jax.default_device(...)` around MJX | `_bisect.py` variant B | **No** — fails with or without |
 | A preceding cuBLAS matmul poisons the context | variant C | **No** — fails either way (the matmul itself always succeeds) |
+| Compiling `forward`/`kinematics` first lets `step` reuse kernels | variants E, F, G | **No** — all three fail |
 
-Variant A — plain `mjx.step`, nothing else — also fails. So the shape of the
-caller is innocent entirely. What separates the passing case from the failing
-one is **which MJX functions get compiled first**: `_mjx_probe.py` calls
-`kinematics` and `forward` before `step`, and every stage including `step`
-passes. `playground/_bisect.py` variants E/F/G test that directly.
+Variants A–G of `_bisect.py` **all fail**, including A (bare `mjx.step`, nothing
+else in the process). So none of the surrounding structure matters, and the only
+remaining difference from the passing `_mjx_probe.py` run is inside the two
+scripts themselves.
 
-Working hypothesis, not yet confirmed: `mjx.step` compiled standalone lowers to
-one large fused module, whereas compiling `forward`/`kinematics` first lets
-`step` reuse already-loaded kernels, so no module needing the unsupported
-operation is ever loaded. Until E/F/G land, use `_mjx_probe.py` as the GPU
-check and treat `mjx_check.py`'s MJX line as unreliable on this host.
+That points at the harness, not at MJX: `_bisect.py` writes `md = mjx.step(mm, md)`,
+but MJX's step mutates its data argument **in place**. If the return value is
+`None`, the second iteration calls `mjx.step(mm, None)`; JAX treats `None` as an
+empty pytree and compiles a different, degenerate function — which is a plausible
+source of a module the driver refuses to load. `_mjx_seq.py` variants P/Q/R test
+the return type and the two loop forms directly.
+
+⚠️ Methodological note, because this cost several runs: two of the seven variants
+were designed from a hypothesis I had inferred rather than observed, and both
+came back negative. The useful step was reading the two scripts side by side,
+which surfaced the API misuse immediately. When a passing case and a failing case
+claim to do the same thing, **diff them before theorising about why**.
 
 ---
 

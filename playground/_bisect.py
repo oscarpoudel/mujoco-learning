@@ -3,21 +3,27 @@
 Symptom: `mjx.step` on the P1000 dies with
 `Failed to load in-memory CUBIN ... CUDA_ERROR_NOT_SUPPORTED`.
 
-Measured so far, one variant per process (a poisoned CUDA context invalidates
-later variants in the same process):
+Measured, one variant per process (a poisoned CUDA context invalidates later
+variants in the same process):
 
     A mjx.step standalone, 200 iters ....... FAIL
     B same, inside jax.default_device ...... FAIL
     C 2048x2048 matmul first, then step .... FAIL (the matmul itself succeeds)
     D B + C combined ....................... FAIL
-    E mjx.forward first, then step ......... (running)
-    F mjx.kinematics first, then step ...... (running)
-    G mjx.forward first, then one step ..... (running)
+    E mjx.forward first, then step ......... FAIL
+    F mjx.kinematics first, then step ...... FAIL
+    G mjx.forward first, then one step ..... FAIL
 
-So the shape of the caller does not matter: `default_device` and a preceding
-matmul are both innocent. What does matter is which MJX functions get compiled
-before `step` -- _mjx_probe.py, which calls kinematics and forward first, passes
-every stage including step.
+All seven fail, including the bare one, so nothing about the surrounding
+structure is responsible. The surviving lead is in this file's own loop form --
+`md = mjx.step(mm, md)` -- versus `_mjx_probe.py`'s in-place `mjx.step(mjm, mjd)`.
+MJX steps mutate their data argument, so the assignment may be replacing `md`
+with None and making iteration 2 compile a different function. See
+`_mjx_seq.py`, which tests that directly; the results are recorded in
+notes/0002-gpu-enablement-checklist.md.
+
+Kept as the record of a negative-result hunt: do not treat the variant labels
+above as a menu of things to try.
 
     for v in A B C D E F G:
       docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
