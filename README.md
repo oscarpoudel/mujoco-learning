@@ -2,7 +2,8 @@
 
 A single place to study MuJoCo by working through several independent community
 tutorials side by side. The three upstream repositories below are **not** merged
-or modified — they are cloned as-is into [`repos/`](repos/) so every file,
+or modified — they are cloned as-is into
+[`repos/`](#fetching-the-upstream-tutorials) so every file,
 commit and attribution stays intact. Everything written here is original: setup
 notes, a topic index that maps the same concept across all three codebases, and
 a playground for my own experiments.
@@ -69,12 +70,14 @@ mujoco-learning/
     └── 0002-gpu-enablement-checklist.md
 ```
 
+### Fetching the upstream tutorials
+
 `repos/` is **not committed** — it holds three upstream git repositories with
 their own histories, and two of them publish no license. Fetch them yourself
-(~818 MB total, `--depth 1` keeps it to the working trees):
+(~818 MB total, `--depth 1` keeps it to the working trees; `git clone` creates
+`repos/` for you):
 
 ```powershell
-mkdir repos
 git clone --depth 1 https://github.com/tayalmanan28/MuJoCo-Tutorial        repos/MuJoCo-Tutorial
 git clone --depth 1 https://github.com/joonhyung-lee/mujoco-robotics-usage repos/mujoco-robotics-usage
 git clone --depth 1 https://github.com/gimmyy/Tutorial_Mujoco_RL           repos/Tutorial_Mujoco_RL
