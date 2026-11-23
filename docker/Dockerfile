@@ -18,7 +18,10 @@
 # BUILD TARGETS
 #   base  physics + jupyter + gymnasium          (~1.5 GB)
 #   rl    + stable-baselines3, torch (CPU), ikpy (~2.5 GB)
-#   mjx   + jax (CPU backend)                    (small add)
+#   mjx   + jax[cuda12] for MJX                  (~+600 MB over CPU jax)
+#
+# GPU: pass the nvidia runtime (see docker-compose.gpu.yml). Without it the
+# container still builds and runs, and MJX quietly uses the CPU.
 #
 # docker build -f docker/Dockerfile --target base -t mujoco-learning .
 
@@ -131,13 +134,24 @@ RUN pip install torch --index-url https://download.pytorch.org/whl/cpu \
 CMD ["bash"]
 
 # ---------------------------------------------------------------------------
-# MJX layer: JAX on the CPU backend. GPU acceleration is unavailable on this
-# host, so MJX here is for learning the API, not for throughput.
+# MJX layer: JAX with the CUDA 12 backend.
+#
+# The extra MUST be cuda12, never cuda13. The cuda13 wheels require compute
+# capability 7.5 (Turing); this host's Quadro P1000 is 6.1, so cuda13 installs
+# cleanly and then silently refuses to use the GPU. cuda12 wants driver R525+,
+# verified here against 582.99 (Release 580 Update 12). Costs ~600 MB over the
+# CPU wheel.
+#
+# To go back to CPU-only (smaller image, no driver needed): "jax" instead of
+# "jax[cuda12]". Physics is identical either way.
 FROM base AS mjx
 
 # mujoco-mjx is the actual MJX package -- jax/jaxlib alone do NOT give you
 # `import mujoco.mjx`. Version is pinned to match the engine already installed.
-RUN pip install mujoco-mjx jax jaxlib \
-    && python -c "import mujoco.mjx as mjx; print('mjx ok on jax', mjx.__version__ if hasattr(mjx,'__version__') else '')"
+# Only importability is checked at build time: a build container has no GPU, so
+# jax.devices() here would always print CPU. Device visibility is verified at
+# run time by docker/mjx_check.py.
+RUN pip install "mujoco-mjx==4.0.1" "jax[cuda12]" \
+    && python -c "import jax, mujoco.mjx; print('jax', jax.__version__, '+ mjx import ok')"
 
 CMD ["bash"]

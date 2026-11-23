@@ -49,7 +49,7 @@ mujoco-learning/
 ├── DOCKER.md              Container setup: what works, what doesn't, and why
 ├── LICENSING.md           Per-repo license status and what it permits
 ├── docker-compose.yml     studio / learn / sim / shell / rl-shell / mjx-shell
-├── docker-compose.gpu.yml GPU override — inactive until the driver is updated
+├── docker-compose.gpu.yml GPU override — CUDA works; does not enable container GL
 ├── .dockerignore          .gitignore (repos/ is not committed)
 ├── docker/
 │   ├── Dockerfile         headless CPU image, 3 targets: base, rl, mjx
@@ -61,6 +61,7 @@ mujoco-learning/
 │   └── Tutorial_Mujoco_RL/       356 MB  (hand/robot meshes)
 ├── playground/            My own scratch space — safe to edit
 │   ├── first_sim.py
+│   ├── render_bench.py    software vs "hardware" GL benchmark (spoiler: software)
 │   └── models/ball.xml
 ├── scripts/
 │   ├── studio.ps1         MuJoCo Studio launcher that avoids the 4.0.1 crash
@@ -260,18 +261,17 @@ docker compose up learn                               # http://localhost:8888
 
 The project is bind-mounted at `/workspace`, so edits are live — no rebuilds.
 
-Two honest caveats, both explained in [DOCKER.md](DOCKER.md): the container is
-**CPU-only** (this host exposes no CUDA to WSL, so `--gpus all` fails), and it
-has **no X11**, so all visualisation goes through the browser. That second
-limitation is what makes Docker a good fit here, because `--gfx=web` never
-touches the buggy native-viewer code path.
+Two honest caveats, both explained in [DOCKER.md](DOCKER.md): in-container
+rendering is **software** (Mesa — Docker Desktop's WSL2 GPU support injects CUDA
+but no GL), and there is **no X11**, so all visualisation goes through the
+browser. That second limitation is what makes Docker a good fit here, because
+`--gfx=web` never touches the buggy native-viewer code path.
 
-Want the GPU working? [notes/0002-gpu-enablement-checklist.md](notes/0002-gpu-enablement-checklist.md)
-is a gated step-by-step. Headline: the blocker is driver **452.56**, which
-predates CUDA-on-WSL (introduced in R470), and **R580 is the last driver branch
-that supports this Pascal Quadro P1000** — so installing "the latest" (R590+)
-would leave the card unsupported. `docker-compose.gpu.yml` is already written
-and validated for when the driver lands.
+CUDA itself works: add `-f docker-compose.gpu.yml` and MJX/JAX get the P1000.
+Getting there took a specific driver — **R580 is the last branch supporting this
+Pascal Quadro P1000**, so "update to latest" (R595+) would have left the card
+unsupported. The whole gated path, including what *doesn't* work, is
+[notes/0002-gpu-enablement-checklist.md](notes/0002-gpu-enablement-checklist.md).
 
 ---
 

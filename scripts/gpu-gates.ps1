@@ -30,7 +30,7 @@ param(
 
 $ErrorActionPreference = 'Continue'
 $Root = Split-Path -Parent $PSScriptRoot
-$Compose = @('-f', 'docker-compose.yml', '-f', 'docker-compose.gpu.yml')
+$Compose = @('compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.gpu.yml')
 $results = @()
 
 function Run-Cmd {
@@ -67,6 +67,12 @@ function Gate {
   return $false
 }
 
+function First-Line {
+  param([string]$Text)
+  $line = ($Text -split "`n" | Where-Object { $_ -match '\S' } | Select-Object -First 1)
+  if ($line) { return $line.Trim() } else { return '<no output>' }
+}
+
 Write-Host "GPU enablement gates -- $($env:COMPUTERNAME)" -ForegroundColor White
 Write-Host "project: $Root`n"
 
@@ -78,7 +84,7 @@ if ($From -le 1) {
     $drv  = [int]$matches[1]
     $name = $matches[3].Trim()
     if ($drv -ge 580 -and $drv -lt 595) {
-      $ok = Gate 1 "Windows driver on the R580 branch" $true "$name, driver $line" ''
+      $ok = Gate 1 "Windows driver on the R580 branch" $true "driver $line" ''
     }
     elseif ($drv -ge 595) {
       Gate 1 "Windows driver on the R580 branch" $false `
@@ -141,11 +147,18 @@ if ($From -le 4) {
   if ($r.Out -match 'libcuda visible') {
     Gate 4 'container has libcuda' $true (($r.Out -split "`n" | Where-Object { $_ -match 'libcuda visible' }) -join '') '' | Out-Null
   }
+  elseif ($r.Code -ne 0 -and $r.Out -notmatch '\[ok  \]|\[FAIL\]') {
+    # The command itself never ran, so say nothing about GPUs.
+    Gate 4 'container has libcuda' $false `
+      ("docker exited {0}: {1}" -f $r.Code, (First-Line $r.Out)) `
+      'The compose invocation failed before doctor.py could run. Run it by hand to see the real error.' | Out-Null
+    exit 1
+  }
   else {
     $detail = ($r.Out -split "`n" | Where-Object { $_ -match '\[FAIL\] gpu' } | Select-Object -First 1)
     Gate 4 'container has libcuda' $false `
-      $(if ($detail) { $detail.Trim() } else { 'doctor.py produced no gpu line' }) `
-      'runtime: nvidia starts containers WITHOUT a GPU on this host and does not warn, so a clean run means nothing. Re-check gates 1-3.' | Out-Null
+      $(if ($detail) { $detail.Trim() } else { 'doctor.py ran but printed no gpu line' }) `
+      'runtime: nvidia can start containers WITHOUT a GPU and not warn, so a clean startup means nothing. Re-check gates 1-3.' | Out-Null
     exit 1
   }
 }
@@ -159,6 +172,12 @@ if ($From -le 5) {
     $r = Run-Cmd 'docker' ($Compose + @('run', '--rm', 'mjx-shell', 'python', 'docker/mjx_check.py'))
     if ($r.Out -match 'GPU PATH READY') {
       Gate 5 'JAX + MJX run on the GPU' $true (($r.Out -split "`n" | Where-Object { $_ -match 'jax.devices' }) -join '') '' | Out-Null
+    }
+    elseif ($r.Code -ne 0 -and $r.Out -notmatch 'GPU PATH') {
+      Gate 5 'JAX + MJX run on the GPU' $false `
+        ("docker exited {0}: {1}" -f $r.Code, (First-Line $r.Out)) `
+        'The compose invocation failed before mjx_check.py could run. Run it by hand to see the real error.' | Out-Null
+      exit 1
     }
     else {
       $detail = ($r.Out -split "`n" | Where-Object { $_ -match '^\[FAIL\]|Falling back to cpu|cuda12' } | Select-Object -First 2)

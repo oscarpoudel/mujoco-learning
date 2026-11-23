@@ -16,7 +16,10 @@ anything. Use it after each step to confirm before moving on:
 .\scripts\gpu-gates.ps1 -IncludeMjx  # also check JAX/MJX on the device (slow)
 ```
 
-Today it reports `[FAIL] gate 1` and stops, which is correct.
+**Status: gates 1–4 passed on 2026-11-22.** Driver 582.99 installed, CUDA live
+in containers. Gate 6 is the one that does **not** work, and for a structural
+reason rather than a configuration one — read it before trying to make container
+rendering fast.
 
 ---
 
@@ -170,6 +173,13 @@ wsl --shutdown
 Docker Desktop runs its own `docker-desktop` WSL VM, which also has to pick up
 the new driver.
 
+⚠️ **Run `docker ps` first.** `wsl --shutdown` stops *every* container on the
+machine, not just this project's. Speaking from an actual mistake: doing this
+killed a Supabase stack that had been running for six hours. Docker's restart
+policy brought it back healthy a minute later, but Postgres did not get a clean
+shutdown, and it shouldn't be relied on. Stop anything you care about first.
+
+- [ ] `docker ps` — stop anything from other projects that matters.
 - [ ] Quit Docker Desktop **fully** (tray → Quit, not just close windows).
 - [ ] `wsl --shutdown`, then start Docker Desktop.
 
@@ -268,20 +278,65 @@ still broken.
 
 ---
 
-## Gate 6 — Hardware rendering (optional)
+## Gate 6 — Hardware rendering in containers: **does not work here**
 
-With the driver fixed, `MUJOCO_GL=egl` in the gpu override becomes real hardware
-EGL rather than llvmpipe software. Confirm by comparing render timing:
+This one is written as a negative result because the obvious expectation is
+wrong, and I fell for it. With the driver fixed, `MUJOCO_GL=egl` in the gpu
+override does **not** become hardware EGL. It stays Mesa **llvmpipe** — software
+rasterisation on the CPU. Measured, same scene, same container, one flag apart:
 
-```powershell
-docker compose run --rm sim python docker/doctor.py                                    # osmesa, software
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm sim python docker/doctor.py   # egl, hardware
+| Scene | `MUJOCO_GL=osmesa` (CPU) | `MUJOCO_GL=egl` (allegedly GPU) | ratio |
+|---|---|---|---|
+| simple, 1280×720 | 14.4 fps | 16.0 fps | ×1.11 |
+| simple, 1920×1080 | 9.1 fps | 8.0 fps | ×0.88 |
+| **600 overlapping spheres, 1280×720** | 2.0 fps | 1.9 fps | **×0.95** |
+| **600 overlapping spheres, 1920×1080** | 1.6 fps | 1.6 fps | **×1.00** |
+
+Reproduce with `playground/render_bench.py` (two `docker compose run` lines in
+its docstring). The 600-sphere rows are the meaningful ones: at one sphere both
+backends are bound by fixed per-frame overhead, which is why their Mpix/s
+*rises* with frame size — impossible for a real rasteriser, and the tell that a
+benchmark is measuring the wrong thing. Make the scene raster-heavy or the
+comparison means nothing.
+
+The corroborating evidence, so this isn't resting on timing alone:
+
+```
+$ docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm sim ldconfig -p | grep cuda
+    libcuda.so.1  => /usr/lib/wsl/drivers/nvlwwi.inf_amd64_99aaa835b366c82a/libcuda.so.1
+$ docker compose ... run --rm sim find /usr/lib /usr/local -name libEGL_nvidia.so.0
+    (nothing)
 ```
 
-Both should pass; the egl run should be visibly faster. Note this does **not**
-fix Studio's native window — that is the separate
-[4.0.1 code bug](0001-mujoco4-studio-native-viewer.md), and no driver fixes it.
-Keep using `--gfx=web`.
+CUDA arrives from the WSL driver mount, which is why `compute,utility` works.
+There is **no NVIDIA EGL/GL implementation in the container at all** — only the
+image's own `libEGL_mesa.so.0` — so EGL has nothing to be hardware with.
+`NVIDIA_DRIVER_CAPABILITIES=graphics` changes nothing on this combination;
+Docker Desktop's WSL2 GPU support injects the CUDA stack, while WSLg's
+hardware GL lives in `/mnt/wslg` + `/usr/lib/wsl/lib` and is not exposed to
+containers.
+
+**What that means in practice:**
+
+| | |
+|---|---|
+| Use the GPU for | MJX, JAX, any CUDA compute |
+| Do **not** expect | faster in-container offscreen rendering |
+| Best rendering path | the Windows side — Studio `--gfx=web` streamed to a browser, which the browser GPU-accelerates for free |
+| In-container rendering | software either way; `osmesa` is at least as fast, so there is no reason to set `MUJOCO_GL=egl` for speed |
+
+Also re-tested on the new driver: Studio's native window still dies on both
+hardware modes with `ValueError: Target not found:` (`--gfx=vulkan` and
+`--gfx=opengl`, 582.99). That confirms the
+[4.0.1 code bug](0001-mujoco4-studio-native-viewer.md) is driver-independent.
+Keep using `--gfx=web` or `--gfx=opengl_software`.
+
+One more red herring, recorded so nobody chases it: inside a container that
+**does** have the GPU, `env` prints `NVIDIA_VISIBLE_DEVICES=void` even though
+compose sets `all`. The NVIDIA container toolkit rewrites that variable to
+`void` after it finishes mounting the drivers, to stop nested injection. It is
+a post-injection marker, not a failure — check `libcuda.so.1` with `ctypes`
+instead (that is what `doctor.py` does).
 
 ---
 

@@ -32,34 +32,61 @@ Checked by actually running it, not by reading docs:
 | Studio in browser | ✅ **`http://localhost:9080/`** | HTTP 200, 25,860 bytes, `title='MuJoCo Web Viewer'` |
 | Write back to `/mnt/c` | ✅ | container runs as uid 1000, files land on the Windows side |
 | `git pull` the repos in-container | ✅ | all three report HEADs: `7cb080d`, `2137f53`, `d6f8710` |
-| GPU / CUDA | ❌ **not available** | see below |
+| GPU / CUDA | ✅ **works** since driver 582.99 | `doctor.py` → `libcuda visible, 1 CUDA device(s)` under `docker-compose.gpu.yml` |
+| GPU *rendering* in-container | ❌ stays software | no `libEGL_nvidia.so.0` exists in the container; see below |
 | Native windows (`mujoco.viewer`, Studio's own window) | ❌ no X11 | see below |
 
 ---
 
-## Why there is no GPU, and no window
+## GPU: CUDA works, container rendering doesn't
 
-Three separate dead ends, all confirmed on this host:
+CUDA is live in containers after updating to driver **582.99**; hardware GL is
+not, and cannot be on this combination. Both halves are measured, and the
+reasoning behind them is worth keeping, so this section documents the state
+rather than just the conclusion:
 
-**1. The nvidia runtime is registered but has nothing to attach to.**
-`docker info` lists an `nvidia` runtime, so the toolkit is installed. But:
-
-```
-$ docker run --rm --gpus all ubuntu:24.04 nvidia-smi
-nvidia-container-cli: initialization error: WSL environment detected
-                    but no adapters were found
-```
-
-**2. The Windows NVIDIA driver doesn't expose CUDA to WSL at all.**
-
-```
-$ wsl -d Ubuntu -- nvidia-smi
-bash: line 1: nvidia-smi: command not found
-$ ls /usr/lib/wsl/lib
-libd3d12.so  libd3d12core.so  libdxcore.so       # no libcuda.so.1
+```powershell
+# the whole chain, in order, with the specific fix printed at the first failure
+.\scripts\gpu-gates.ps1 -IncludeMjx
 ```
 
-**3. There is no X server reachable from the Docker VM.**
+| | |
+|---|---|
+| CUDA / MJX / JAX | ✅ `libcuda.so.1` from `/usr/lib/wsl/drivers/…`, `--gpus all` prints the P1000 |
+| `MUJOCO_GL=egl` | ❌ still Mesa llvmpipe. There is no NVIDIA EGL in the container to use |
+| Native windows | ❌ still no X11 socket in the Docker VM |
+
+**Why GL can't be hardware here:** Docker Desktop's WSL2 GPU support injects the
+CUDA driver stack into containers. WSL's hardware GL lives in `/mnt/wslg` and
+`/usr/lib/wsl/lib`, which the `docker-desktop` VM does not pass through, so
+`NVIDIA_DRIVER_CAPABILITIES=graphics` has nothing to attach to. The benchmark and
+`ldconfig` evidence are in
+[notes/0002 Gate 6](notes/0002-gpu-enablement-checklist.md), along with
+`playground/render_bench.py` to reproduce it.
+
+⚠️ One trap that cost real time: under `runtime: nvidia`, a container starts
+**successfully even with no GPU**, and inside a *working* GPU container `env`
+shows `NVIDIA_VISIBLE_DEVICES=void` (the toolkit rewrites it after mounting).
+Neither signal is trustworthy. Verify with
+`run --rm sim python docker/doctor.py` and look for `libcuda visible`.
+
+### Before the driver update
+
+Recorded because the failure modes are distinctive and the diagnosis took work:
+
+| Check (driver 452.56, CUDA 11.0, Oct 2020) | Result |
+|---|---|
+| `docker run --rm --gpus all ubuntu:24.04 nvidia-smi` | `WSL environment detected but no adapters were found` |
+| `wsl -d Ubuntu -- nvidia-smi` | `command not found` |
+| `ls /usr/lib/wsl/lib` | `libd3d12.so libd3d12core.so libdxcore.so` — **no `libcuda.so.1`** |
+
+Not a misconfiguration: CUDA-on-WSL was introduced in driver branch **R470**, so
+R452 has no WSL GPU component at all. And **R580 is the last branch supporting
+Maxwell/Pascal/Volta** — installing "the latest" (R595+) would have left this
+Quadro P1000 with no driver whatsoever. Which build, where, and why:
+[notes/0002 Gate 1](notes/0002-gpu-enablement-checklist.md).
+
+### There is no X server reachable from the Docker VM
 
 ```
 $ docker run -v /tmp/.X11-unix:/tmp/.X11-unix ubuntu:24.04 ls /tmp/.X11-unix
@@ -74,32 +101,14 @@ its own `docker-desktop` VM, which does not inherit the WSLg socket.
 `--gfx=web` is the right answer for Docker, and it has a bonus: it also dodges
 the [4.0.1 native-viewer bug](notes/0001-mujoco4-studio-native-viewer.md)
 because it never touches `native_viewer.py` or Filament server-side. Rendering
-happens in your browser via WASM, so no GPU is involved anywhere.
+happens in your browser, where the browser's own GPU context accelerates it —
+which is more than the container can say.
 
 If you want a real native window, run it on the Windows side:
 
 ```powershell
 .\scripts\studio.ps1 playground\models\ball.xml          # --gfx=opengl_software
 ```
-
-### Fixing the GPU later
-
-There is a full gated checklist in
-[notes/0002-gpu-enablement-checklist.md](notes/0002-gpu-enablement-checklist.md).
-The two facts that make it non-generic:
-
-- The blocker is driver **452.56 (CUDA 11.0, Oct 2020)**. CUDA-on-WSL was only
-  introduced in driver branch **R470**, so this driver has no WSL GPU component
-  to misconfigure.
-- **Do not install the latest driver.** **R580 is the last branch supporting
-  Maxwell/Pascal/Volta**; R590+ dropped them, and this is a Pascal Quadro P1000.
-
-`docker-compose.gpu.yml` is already written and validated, so once the driver
-lands it is `-f docker-compose.yml -f docker-compose.gpu.yml` and nothing else.
-One caveat learned the hard way: under `runtime: nvidia` the container starts
-**successfully with no GPU**, so verify with
-`run --rm sim python docker/doctor.py` and look for
-`libcuda visible` rather than trusting a clean startup.
 
 Verified in `mjx-shell`: `mujoco-mjx 4.0.1` (version-matched to the engine),
 `mujoco.mjx` imports, `jax 0.10.2 devices=['cpu']`. On startup MJX prints

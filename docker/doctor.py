@@ -195,8 +195,8 @@ def check_gpu() -> None:
 
     if os.environ.get("MUJOCO_GL", "") == "egl":
         detail += "; MUJOCO_GL=egl is succeeding via Mesa llvmpipe = SOFTWARE, not the GPU"
-    record("gpu", False, detail + ". Cause: host driver 452.56 predates CUDA-on-WSL "
-                                  "(needs R470+). See notes/0002-gpu-enablement-checklist.md")
+    record("gpu", False, detail + ". Work the gates in "
+                                  "notes/0002-gpu-enablement-checklist.md (scripts/gpu-gates.ps1)")
 
 
 def main() -> int:
