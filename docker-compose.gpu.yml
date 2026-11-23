@@ -58,6 +58,14 @@ services:
       MUJOCO_GL: egl
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility,graphics
-    # MJX needs the CUDA-enabled jaxlib. Note the extra is cuda12, NOT cuda13:
-    # the cuda13 wheels require compute capability 7.5+ (Turing), and the P1000
-    # is 6.1. See the Dockerfile mjx stage.
+      # MJX needs the CUDA-enabled jaxlib. Note the extra is cuda12, NOT cuda13:
+      # the cuda13 wheels require compute capability 7.5+ (Turing), and the P1000
+      # is 6.1. See the Dockerfile mjx stage.
+      #
+      # These two are what make JAX start at all on this GPU. By default the CUDA
+      # plugin preallocates 75% of *total* VRAM -- ~3 GB -- but the desktop
+      # already holds ~2 GB of this 4 GB P1000, so JAX aborts with
+      # CUDA_ERROR_OUT_OF_MEMORY before running a single op. Allocate on demand
+      # and keep a headroom-aware ceiling instead.
+      XLA_PYTHON_CLIENT_PREALLOCATE: "false"
+      XLA_PYTHON_CLIENT_MEM_FRACTION: "0.35"

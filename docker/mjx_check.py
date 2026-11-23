@@ -26,9 +26,22 @@ def report(label: str, passed: bool, detail: str = "") -> None:
 
 
 def is_gpu(device) -> bool:
-    """True if this jax device is a GPU, across jax versions."""
-    kind = str(getattr(device, "device_kind", "") or "")
-    return "gpu" in kind.lower() or "cuda" in kind.lower() or "nvidia" in kind.lower()
+    """True if this jax device is a GPU.
+
+    Do NOT test device_kind for 'gpu'/'cuda'/'nvidia': device_kind is the
+    *product* name, and a genuinely working P1000 reports 'Quadro P1000', which
+    matches none of those. This made the gate fail a healthy GPU. `platform` is
+    the reliable discriminator; the class name is the fallback for older jax.
+    """
+    platform = str(getattr(device, "platform", "") or "").lower()
+    if platform:
+        return platform in ("cuda", "gpu")
+    name = type(device).__name__.lower()
+    return "cuda" in name or "gpu" in name
+
+
+def all_on_gpu(devices) -> bool:
+    return bool(devices) and all(is_gpu(d) for d in devices)
 
 
 def device_label(device) -> str:
@@ -82,8 +95,8 @@ def main() -> int:
             x = jnp.ones((2048, 2048))
             y = float((x @ x).sum())
         placed = {device_label(d) for d in x.devices()}
-        report("gpu matmul", y > 0 and all(
-            "cpu" not in p.lower() for p in placed), f"sum={y:.0f} on {sorted(placed)}")
+        report("gpu matmul", y > 0 and all_on_gpu(x.devices()),
+               f"sum={y:.0f} on {sorted(placed)}")
     except Exception as exc:
         report("gpu matmul", False, f"{type(exc).__name__}: {exc}")
 
@@ -111,9 +124,8 @@ def main() -> int:
             qpos = jnp.asarray(mjx_data.qpos)
         z = float(qpos[2])
         placed = {device_label(dd) for dd in qpos.devices()}
-        report("mjx.step on device", z < 0 and all(
-            "cpu" not in p.lower() for p in placed),
-            f"free-fall z={z:.4f} on {sorted(placed)}")
+        report("mjx.step on device", z < 0 and all_on_gpu(qpos.devices()),
+               f"free-fall z={z:.4f} on {sorted(placed)}")
     except Exception as exc:
         report("mjx.step on device", False,
                f"{type(exc).__name__}: {str(exc).splitlines()[0]}")

@@ -225,9 +225,7 @@ The `gpu` line must read **`libcuda visible, 1 CUDA device(s)`** instead of
 
 ## Gate 5 — Actually use it for MJX
 
-The `mjx` image target currently installs **plain `jax`**, which is CPU-only —
-that is why you see `Falling back to cpu`. One line to change, and the extra
-matters:
+The extra matters more than the version:
 
 | Extra | Min driver | Min compute capability | P1000 (6.1)? |
 |---|---|---|---|
@@ -235,46 +233,97 @@ matters:
 | `jax[cuda12]` | 525 | 5.2 (Maxwell) | ✅ works |
 | plain `jax` | — | — | CPU only |
 
-So use `cuda12`. Never `cuda13` — it would install successfully and then refuse
-to use the GPU.
-
-In `docker/Dockerfile`, in the `mjx` stage, change:
-
-```dockerfile
-RUN pip install mujoco-mjx jax jaxlib \
-```
-
-to:
+Use `cuda12`. Never `cuda13` — it installs successfully and then refuses to use
+the GPU. The `mjx` Dockerfile stage now does this:
 
 ```dockerfile
 RUN pip install "mujoco-mjx==4.0.1" "jax[cuda12]" \
 ```
 
 (`mujoco-mjx` must stay pinned to the engine version, currently 4.0.1. The
-cuda12 wheels add roughly 600 MB, which is why this is opt-in and not the
-default.)
+cuda12 wheels add roughly 600 MB.)
 
-Then rebuild and verify:
+### JAX will not start without a memory cap
 
-```powershell
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml build mjx-shell
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm mjx-shell python docker/mjx_check.py
-```
-
-**Gate** — `docker/mjx_check.py` checks four things in order, each of which can
-fail independently:
+With the CUDA wheels installed, JAX aborts **before running anything**:
 
 ```
-[ok  ] libcuda.so.1               1 CUDA device(s) visible
-[ok  ] jax.devices()              [CudaDevice(id=0)] kinds=['Quadro P1000']
-[ok  ] gpu matmul                 sum=... on Quadro P1000
-[ok  ] mjx.step on device         sphere fell to z=-0.7887
-
-GPU PATH READY
+RESOURCE_EXHAUSTED: CUDA_ERROR_OUT_OF_MEMORY
 ```
 
-If it prints `GPU PATH NOT READY`, the line that failed tells you which layer is
-still broken.
+The CUDA plugin preallocates **75% of total VRAM** — ~3 GB — but the desktop
+already holds ~2 GB of this 4 GB card. Two env vars fix it, and they are now set
+on `mjx-shell` in `docker-compose.gpu.yml`:
+
+```yaml
+      XLA_PYTHON_CLIENT_PREALLOCATE: "false"
+      XLA_PYTHON_CLIENT_MEM_FRACTION: "0.35"
+```
+
+Close other GPU-using apps before MJX runs anyway. Check what is free while a
+run is going with `nvidia-smi` on the Windows side, not in the container.
+
+### Results
+
+```
+$ docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm mjx-shell python playground/_mjx_probe.py
+device: cuda:0
+  [ok  ] put_model                  -> uploaded
+  [ok  ] put_data                   -> uploaded
+  [ok  ] kinematics                 -> ok
+  [ok  ] forward                    -> ok
+  [ok  ] step x1                    -> ok
+  [ok  ] step x10 via scan          -> ok
+```
+
+So MJX does run on the P1000, including a 10-step `lax.scan`.
+
+### A checker bug worth knowing about
+
+`mjx_check.py` reported `jax.devices()` as a **failure** while printing
+`[CudaDevice(id=0)] kinds=['Quadro P1000']`. The check looked for
+"gpu"/"cuda"/"nvidia" inside `device_kind` — but `device_kind` is the **product
+name**, and "Quadro P1000" contains none of those. A healthy GPU was being
+reported broken by the thing built to catch unhealthy GPUs.
+
+The correct discriminator is `device.platform` (`"cuda"` / `"gpu"`), with
+`type(device).__name__` as a fallback:
+
+```python
+platform = str(getattr(device, "platform", "") or "").lower()
+is_gpu = platform in ("cuda", "gpu") if platform else "cuda" in type(device).__name__.lower()
+```
+
+### Open issue: `mjx.step` cannot load its kernel standalone
+
+```
+JaxRuntimeError: INTERNAL: CUDA error: [0] Failed to load in-memory CUBIN
+(compiled for a different GPU?).: CUDA_ERROR_NOT_SUPPORTED
+[executable_name='jit_squeeze']
+```
+
+What has been eliminated, each by a dedicated run rather than by reasoning:
+
+| Hypothesis | Test | Verdict |
+|---|---|---|
+| General XLA codegen is blocked on this GPU | `playground/_jit_probe.py`: jitted elementwise, `squeeze` (the exact failing op), fused transpose+matmul, `lax.scan`, `lax.while_loop` | **No** — all load fine |
+| Pascal is unsupported on WSL | NVIDIA's CUDA-on-WSL guide lists Maxwell as unsupported, "Pascal and later" as recommended | **No** |
+| XLA autotuning generates the bad kernel | `XLA_FLAGS=--xla_gpu_autotune_level=0` | **No** — same failure |
+| Compilation-thread context race | `XLA_FLAGS=--xla_gpu_force_compilation_parallelism=1` | **No** — same failure |
+| `with jax.default_device(...)` around MJX | `_bisect.py` variant B | **No** — fails with or without |
+| A preceding cuBLAS matmul poisons the context | variant C | **No** — fails either way (the matmul itself always succeeds) |
+
+Variant A — plain `mjx.step`, nothing else — also fails. So the shape of the
+caller is innocent entirely. What separates the passing case from the failing
+one is **which MJX functions get compiled first**: `_mjx_probe.py` calls
+`kinematics` and `forward` before `step`, and every stage including `step`
+passes. `playground/_bisect.py` variants E/F/G test that directly.
+
+Working hypothesis, not yet confirmed: `mjx.step` compiled standalone lowers to
+one large fused module, whereas compiling `forward`/`kinematics` first lets
+`step` reuse already-loaded kernels, so no module needing the unsupported
+operation is ever loaded. Until E/F/G land, use `_mjx_probe.py` as the GPU
+check and treat `mjx_check.py`'s MJX line as unreliable on this host.
 
 ---
 
